@@ -1,0 +1,66 @@
+###
+GET http://localhost:5000/api/dashboard
+
+###
+POST http://localhost:5000/api/auth/google
+Content-Type: application/json
+
+{
+    "code": "4/0ASc3gC1fROonfsSLPAw-KrCqtGBoWRcSEqoqVnGGTh1wlyzGSKL-0qkxK_boYNTR7Wy_IQ",
+    "codeVerifier": "UcA6msN9WwiWbYZAEJjAtwIY00vrdfJvUSx-pFn7AN4"
+}
+
+###
+GET http://localhost:5000/api/user/me
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI1OGE4NDE0ZC03OWZmLTQ4ZmEtOGNjMC03ZjZkZjRlNDU4NTYiLCJlbWFpbCI6ImRldmFuc2hrYXBhZGlhMDBAZ21haWwuY29tIiwiaWF0IjoxNzcwOTc0MjY2LCJleHAiOjE3NzA5ODUwNjZ9.eGmJf5VOXCPqDCNmHxk3JuQj9Vk0eH5fNKUYEM5dsu0
+
+###
+GET http://localhost:5000/gmail/connect
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI1OGE4NDE0ZC03OWZmLTQ4ZmEtOGNjMC03ZjZkZjRlNDU4NTYiLCJlbWFpbCI6ImRldmFuc2hrYXBhZGlhMDBAZ21haWwuY29tIiwiaWF0IjoxNzcwOTc0MjY2LCJleHAiOjE3NzA5ODUwNjZ9.eGmJf5VOXCPqDCNmHxk3JuQj9Vk0eH5fNKUYEM5dsu0
+
+###
+GET http://localhost:5000/gmail/status
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI1OGE4NDE0ZC03OWZmLTQ4ZmEtOGNjMC03ZjZkZjRlNDU4NTYiLCJlbWFpbCI6ImRldmFuc2hrYXBhZGlhMDBAZ21haWwuY29tIiwiaWF0IjoxNzcwOTc0MjY2LCJleHAiOjE3NzA5ODUwNjZ9.eGmJf5VOXCPqDCNmHxk3JuQj9Vk0eH5fNKUYEM5dsu0
+
+### 
+GET http://localhost:5000/gmail/scan/test
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJmMTkzYjM1My0wMTNjLTQwYWQtOGYyNy05ZmI3OWFkNzYwZjAiLCJlbWFpbCI6ImRldmFuc2hrYXBhZGlhMDBAZ21haWwuY29tIiwiaWF0IjoxNzcwNzg5MjI1LCJleHAiOjE3NzA3OTI4MjV9.Nn1w6Ad_bAbR8KzfYEbBFaTOCwZ2OEBPz8vjIOTOjSA
+
+###
+POST http://localhost:5000/gmail/historical-scan
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJmMTkzYjM1My0wMTNjLTQwYWQtOGYyNy05ZmI3OWFkNzYwZjAiLCJlbWFpbCI6ImRldmFuc2hrYXBhZGlhMDBAZ21haWwuY29tIiwiaWF0IjoxNzcwODgyNjc3LCJleHAiOjE3NzA4OTM0Nzd9.PnZS--uvD448Fd6Ezuujd_lIzZHg84jpD4YHvkrBZxU
+
+
+
+###
+GET http://localhost:5000/api/dashboard
+
+###
+GET http://localhost:5000/api/subscriptions
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI1OGE4NDE0ZC03OWZmLTQ4ZmEtOGNjMC03ZjZkZjRlNDU4NTYiLCJlbWFpbCI6ImRldmFuc2hrYXBhZGlhMDBAZ21haWwuY29tIiwiaWF0IjoxNzcwOTc0MjY2LCJleHAiOjE3NzA5ODUwNjZ9.eGmJf5VOXCPqDCNmHxk3JuQj9Vk0eH5fNKUYEM5dsu0
+
+###
+GET http://localhost:5000/api/subscriptions/87303b15-755f-4fc7-88d9-85ea71d0e947
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI1OGE4NDE0ZC03OWZmLTQ4ZmEtOGNjMC03ZjZkZjRlNDU4NTYiLCJlbWFpbCI6ImRldmFuc2hrYXBhZGlhMDBAZ21haWwuY29tIiwiaWF0IjoxNzcwOTc0MjY2LCJleHAiOjE3NzA5ODUwNjZ9.eGmJf5VOXCPqDCNmHxk3JuQj9Vk0eH5fNKUYEM5dsu0
+
+###
+POST http://localhost:5000/api/subscriptions/87303b15-755f-4fc7-88d9-85ea71d0e947/confirm
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI1OGE4NDE0ZC03OWZmLTQ4ZmEtOGNjMC03ZjZkZjRlNDU4NTYiLCJlbWFpbCI6ImRldmFuc2hrYXBhZGlhMDBAZ21haWwuY29tIiwiaWF0IjoxNzcwOTc0MjY2LCJleHAiOjE3NzA5ODUwNjZ9.eGmJf5VOXCPqDCNmHxk3JuQj9Vk0eH5fNKUYEM5dsu0
+
+###
+POST http://localhost:5000/gmail/historical-scan
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI1OGE4NDE0ZC03OWZmLTQ4ZmEtOGNjMC03ZjZkZjRlNDU4NTYiLCJlbWFpbCI6ImRldmFuc2hrYXBhZGlhMDBAZ21haWwuY29tIiwiaWF0IjoxNzcwOTc0MjY2LCJleHAiOjE3NzA5ODUwNjZ9.eGmJf5VOXCPqDCNmHxk3JuQj9Vk0eH5fNKUYEM5dsu0
+
+###
+GET http://localhost:5000/api/subscriptions/upcoming-renewals
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI1OGE4NDE0ZC03OWZmLTQ4ZmEtOGNjMC03ZjZkZjRlNDU4NTYiLCJlbWFpbCI6ImRldmFuc2hrYXBhZGlhMDBAZ21haWwuY29tIiwiaWF0IjoxNzcwOTc0MjY2LCJleHAiOjE3NzA5ODUwNjZ9.eGmJf5VOXCPqDCNmHxk3JuQj9Vk0eH5fNKUYEM5dsu0
+
+# https://accounts.google.com/o/oauth2/v2/auth?client_id=635040404028-ta16mb8rt1q466k9re2c6hq60a6rrf75.apps.googleusercontent.com&redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Fauth%2Fcallback&response_type=code&scope=openid%20email%20profile
+
+
+# https://accounts.google.com/o/oauth2/v2/auth?client_id=635040404028-ta16mb8rt1q466k9re2c6hq60a6rrf75.apps.googleusercontent.com&redirect_uri=http%3A%2F%2Flocalhost%3A5000%2Fauth%2Fcallback&response_type=code&scope=openid%20email%20profile
+
+
+# https://accounts.google.com/o/oauth2/v2/auth?client_id=635040404028-ta16mb8rt1q466k9re2c6hq60a6rrf75.apps.googleusercontent.com&redirect_uri=http%3A%2F%2Flocalhost%3A5000%2Fauth%2Fcallback&response_type=code&scope=openid%20email%20profile&code_challenge=d9Fl49h7JqCGMc-Qz05Ecv5ig7C-15TLzbORvZ7UjXg&code_challenge_method=S256
+
+# http://localhost:5000/gmail/connect?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI1OGE4NDE0ZC03OWZmLTQ4ZmEtOGNjMC03ZjZkZjRlNDU4NTYiLCJlbWFpbCI6ImRldmFuc2hrYXBhZGlhMDBAZ21haWwuY29tIiwiaWF0IjoxNzcwOTc0MjY2LCJleHAiOjE3NzA5ODUwNjZ9.eGmJf5VOXCPqDCNmHxk3JuQj9Vk0eH5fNKUYEM5dsu0

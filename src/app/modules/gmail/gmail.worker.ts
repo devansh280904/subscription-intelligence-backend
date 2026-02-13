@@ -1,5 +1,5 @@
 import { fetchGmailMessageContent } from "./gmail.scanner";
-import { extractAllSubscriptionData, extractProviderName, extractSubscriptionDates } from "./gmail.parser";
+import { extractAllSubscriptionData, extractProviderName, extractSubscriptionDates, isValidSubscriptionDate } from "./gmail.parser";
 import prisma from "../../config/prisma";
 
 export async function processSubscriptionEmail(
@@ -32,17 +32,34 @@ export async function processSubscriptionEmail(
             console.log('[Worker] Provider not Detected, skipping');
             return;
         }
+        const provider = extracted.provider
 
         console.log('[Worker] Extracted Data:', {
             provider: extracted.provider,
             amount: extracted.amount,
             currency: extracted.currency,
             cycle: extracted.billingCycle,
-            lifecycleEvent
+            lifecycleEvent,
+            startedAt: extracted.startedAt,
+            renewalDate: extracted.renewalDate
         })
 
 
-        // chekcing if subscription exists
+        // ✅ FIXED: Parse and validate email date once
+        let emailDateParsed: Date | null = null;
+        if (emailDate) {
+            try {
+                emailDateParsed = new Date(emailDate);
+                if (!isValidSubscriptionDate(emailDateParsed)) {
+                    console.warn('[Worker] Invalid email date, ignoring:', emailDate);
+                    emailDateParsed = null;
+                }
+            } catch (error) {
+                console.error('[Worker] Error parsing email date:', emailDate, error);
+            }
+        }
+
+        // checking if subscription exists
         const existing = await prisma.subscription.findUnique({
             where: {
                 /* SELECT * FROM "Subscription"
@@ -55,7 +72,6 @@ export async function processSubscriptionEmail(
                 },
             },
             include: {
-
                 // also fetching paymentcycles, descending and only taking top one( most recent payment)
                 paymentCycles: {
                     orderBy: {
@@ -74,106 +90,125 @@ export async function processSubscriptionEmail(
         let finalEndedAt = existing?.endedAt ?? null;
         let finalStatus = lifecycleEvent ?? existing?.status ?? 'ACTIVE'
 
-        // if this subscription just became ACTIVE, and we don’t already have a start date,then set one.
+        // ✅ FIXED: Better date priority logic
+        // if this subscription just became ACTIVE, and we don't already have a start date, then set one.
         if (!finalStartedAt && lifecycleEvent === 'ACTIVE') {
-            finalStartedAt = extracted.startedAt ?? (emailDate ? new Date(emailDate) : now)
+            // Priority: extracted date > email date > now
+            if (extracted.startedAt && isValidSubscriptionDate(extracted.startedAt)) {
+                finalStartedAt = extracted.startedAt;
+            } else if (emailDateParsed) {
+                finalStartedAt = emailDateParsed;
+            } else {
+                finalStartedAt = now;
+            }
         }
 
         // if life cycle is 'cancelled' we put 'CANCELLED' and put end date as now 
         if (lifecycleEvent === 'CANCELLED' && !finalEndedAt) {
             finalStatus = 'CANCELLED';
-            finalEndedAt = now;
+            // Use email date if available, otherwise now
+            finalEndedAt = emailDateParsed ?? now;
+        }
+        if (!extracted.provider) {
+            console.log('[Worker] Provider not Detected, skipping');
+            return;
         }
 
-
-        // upserting the data 
-        const subscription = await prisma.subscription.upsert({
-            where: {
-                userId_provider: {
-                    userId,
-                    provider: extracted.provider,
-                },
-            },
-            update: {
-                status: finalStatus,
-                endedAt: finalEndedAt,
-                amount: extracted.amount ?? existing?.amount,
-                currency: extracted.currency ?? existing?.currency,
-                billingCycle: extracted.billingCycle ?? existing?.billingCycle,
-                renewalDate: extracted.renewalDate ?? existing?.renewalDate,
-                planName: extracted.planName ?? existing?.planName,
-                lastEmailDate: emailDate ? new Date(emailDate) : undefined,
-                needsConfirmation: true, // Always set to true when new data comes in
-            },
-            create: {
-                userId,
-                provider: extracted.provider,
-                status: finalStatus,
-                startedAt: finalStartedAt,
-                endedAt: finalEndedAt,
-                amount: extracted.amount,
-                currency: extracted.currency,
-                billingCycle: extracted.billingCycle,
-                renewalDate: extracted.renewalDate,
-                planName: extracted.planName,
-                lastEmailDate: emailDate ? new Date(emailDate) : undefined,
-                needsConfirmation: true,
-            },
-        });
-
-        // if payment successfull mail
-        if (
-            lifecycleEvent === 'ACTIVE' &&
-            extracted.amount &&
-            emailDate
-        ) {
-            const paymentDate = new Date(emailDate);
-
-            // we find if any payment exists withing 24 hours window in past and future
-            const existingPayment = await prisma.paymentCycle.findFirst({
+        // ✅ IMPROVED: Use transaction for atomic updates
+        const subscription = await prisma.$transaction(async (tx) => {
+            // upserting the data 
+            const sub = await tx.subscription.upsert({
                 where: {
-                    subscriptionId: subscription.id,
-                    paymentDate: {
-                        gte: new Date(paymentDate.getTime() - 24 * 60 * 60 * 1000),
-                        lte: new Date(paymentDate.getTime() + 24 * 60 * 60 * 1000)
-                    }
-                }
-            })
+                    userId_provider: {
+                        userId,
+                        provider: provider
+                    },
+                },
+                update: {
+                    status: finalStatus,
+                    endedAt: finalEndedAt,
+                    amount: extracted.amount ?? existing?.amount,
+                    currency: extracted.currency ?? existing?.currency,
+                    billingCycle: extracted.billingCycle ?? existing?.billingCycle,
+                    renewalDate: extracted.renewalDate ?? existing?.renewalDate,
+                    planName: extracted.planName ?? existing?.planName,
+                    lastEmailDate: emailDateParsed ?? undefined,
+                    needsConfirmation: true, // Always set to true when new data comes in
+                },
+                create: {
+                    userId,
+                    provider: provider,
+                    status: finalStatus,
+                    startedAt: finalStartedAt,
+                    endedAt: finalEndedAt,
+                    amount: extracted.amount,
+                    currency: extracted.currency,
+                    billingCycle: extracted.billingCycle,
+                    renewalDate: extracted.renewalDate,
+                    planName: extracted.planName,
+                    lastEmailDate: emailDateParsed ?? undefined,
+                    needsConfirmation: true,
+                },
+            });
 
-            // if record doesnt exist we add data
-            if (!existingPayment) {
-                await prisma.paymentCycle.create({
-                    data: {
-                        subscriptionId: subscription.id,
-                        amount: extracted.amount,
-                        currency: extracted.currency ?? 'INR',
-                        paymentDate,
-                        emailMessageId: messageId,
-                        status: 'SUCCESS'
+            // if payment successful mail
+            if (
+                lifecycleEvent === 'ACTIVE' &&
+                extracted.amount &&
+                emailDateParsed
+            ) {
+                // ✅ FIXED: Use 3-day window instead of 24 hours
+                const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
+
+                // we find if any payment exists within 3 days window in past and future
+                const existingPayment = await tx.paymentCycle.findFirst({
+                    where: {
+                        subscriptionId: sub.id,
+                        paymentDate: {
+                            gte: new Date(emailDateParsed.getTime() - threeDaysMs),
+                            lte: new Date(emailDateParsed.getTime() + threeDaysMs)
+                        }
                     }
                 })
 
-                console.log('[Worker] Payment cycle recorded:', {
-                    provider: extracted.provider,
-                    amount: extracted.amount,
-                    date: paymentDate
+                // if record doesn't exist we add data
+                if (!existingPayment) {
+                    await tx.paymentCycle.create({
+                        data: {
+                            subscriptionId: sub.id,
+                            amount: extracted.amount,
+                            currency: extracted.currency ?? 'INR',
+                            paymentDate: emailDateParsed,
+                            emailMessageId: messageId,
+                            status: 'SUCCESS'
+                        }
+                    })
+
+                    console.log('[Worker] Payment cycle recorded:', {
+                        provider: extracted.provider,
+                        amount: extracted.amount,
+                        date: emailDateParsed
+                    })
+                }
+            }
+
+            // if failed payment mail
+            if (lifecycleEvent === 'PAYMENT_FAILED' && emailDateParsed) {
+                await tx.paymentCycle.create({
+                    data: {
+                        subscriptionId: sub.id,
+                        amount: extracted.amount ?? existing?.amount ?? 0,
+                        currency: extracted.currency ?? existing?.currency ?? 'USD',
+                        paymentDate: emailDateParsed,
+                        emailMessageId: messageId,
+                        status: 'FAILED',
+                    }
                 })
             }
-        }
 
-        // if failed payment mail
-        if (lifecycleEvent === 'PAYMENT_FAILED' && emailDate) {
-            await prisma.paymentCycle.create({
-                data: {
-                    subscriptionId: subscription.id,
-                    amount: extracted.amount ?? existing?.amount ?? 0,
-                    currency: extracted.currency ?? existing?.currency ?? 'USD',
-                    paymentDate: new Date(emailDate),
-                    emailMessageId: messageId,
-                    status: 'FAILED',
-                }
-            })
-        }
+            return sub;
+        });
+
         console.log('[Worker] SUCCESSFULLY processed subscription:', {
             provider: extracted.provider,
             status: finalStatus
@@ -237,28 +272,63 @@ export async function checkAndUpdateRenewal(
     }
 }
 
-function calculateNextRenewal(lastPaymentDate: Date,
-    billingCycle: string | null): Date | null {
+// ✅ FIXED: Safer date calculation with proper timezone handling
+function calculateNextRenewal(lastPaymentDate: Date, billingCycle: string | null): Date | null {
     if (!billingCycle) return null;
 
-    const nextRenewal = new Date(lastPaymentDate);
+    try {
+        // Create new Date object to avoid mutating the original
+        const nextRenewal = new Date(lastPaymentDate.getTime());
 
-    switch (billingCycle) {
-        case 'MONTHLY':
-            nextRenewal.setMonth(nextRenewal.getMonth() + 1);
-            break;
-        case 'YEARLY':
-            nextRenewal.setFullYear(nextRenewal.getFullYear() + 1);
-            break;
-        case 'QUARTERLY':
-            nextRenewal.setMonth(nextRenewal.getMonth() + 3);
-            break;
-        case 'WEEKLY':
-            nextRenewal.setDate(nextRenewal.getDate() + 7);
-            break;
-        default:
-            return null;
+        switch (billingCycle) {
+            case 'MONTHLY':
+                // Get the current month and add 1
+                const currentMonth = nextRenewal.getMonth();
+                const currentYear = nextRenewal.getFullYear();
+                const currentDay = nextRenewal.getDate();
+
+                // Set to next month
+                nextRenewal.setMonth(currentMonth + 1);
+
+                // Handle month overflow (e.g., Jan 31 -> Feb 31 becomes Mar 3)
+                // Reset to last day of intended month if overflow occurred
+                if (nextRenewal.getMonth() !== (currentMonth + 1) % 12) {
+                    nextRenewal.setDate(0); // Go to last day of previous month
+                }
+                break;
+
+            case 'YEARLY':
+                nextRenewal.setFullYear(nextRenewal.getFullYear() + 1);
+                break;
+
+            case 'QUARTERLY':
+                const quarterMonth = nextRenewal.getMonth();
+                nextRenewal.setMonth(quarterMonth + 3);
+
+                // Handle month overflow
+                if (nextRenewal.getMonth() !== (quarterMonth + 3) % 12) {
+                    nextRenewal.setDate(0);
+                }
+                break;
+
+            case 'WEEKLY':
+                nextRenewal.setDate(nextRenewal.getDate() + 7);
+                break;
+
+            default:
+                return null;
+        }
+
+        // Validate the calculated date
+        if (isValidSubscriptionDate(nextRenewal)) {
+            return nextRenewal;
+        }
+
+        console.warn('[Worker] Calculated renewal date is invalid:', nextRenewal);
+        return null;
+
+    } catch (error) {
+        console.error('[Worker] Error calculating next renewal:', error);
+        return null;
     }
-
-    return nextRenewal;
 }

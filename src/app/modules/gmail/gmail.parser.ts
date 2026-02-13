@@ -20,7 +20,7 @@ export function extractProviderName(fromHeader: string | null, body: string): st
 
 
     const providerMap: Record<string, string[]> = {
-        'Netflix': ['netflix.com', 'netflix'],
+        'Netflix': ['netflix.com', 'netflix', '@nflx'],
         'LinkedIn': ['linkedin.com', 'linkedin'],
         'Spotify': ['spotify.com', 'spotify'],
         'Amazon Prime': ['primevideo.com', 'amazon.com/prime', 'amazon prime'],
@@ -79,18 +79,18 @@ export function extractAmount(text: string): { amount: number | null; currency: 
 
     // Patterns for different currency formats
     const patterns = [
+        // ₹649, ₹999.99 (Indian rupee - prioritize this for your case)
+        /₹\s*(\d{1,5}(?:\.\d{2})?)/g,
         // $9.99, $99.99, $999.99
         /\$\s*(\d{1,4}(?:\.\d{2})?)/g,
         // €9.99, €99,99
         /€\s*(\d{1,4}(?:[.,]\d{2})?)/g,
         // £9.99
         /£\s*(\d{1,4}(?:\.\d{2})?)/g,
-        // ₹999, ₹99.99
-        /₹\s*(\d{1,5}(?:\.\d{2})?)/g,
-        // USD 9.99, EUR 9.99
-        /(USD|EUR|GBP|INR|CAD|AUD)\s*(\d{1,4}(?:\.\d{2})?)/gi,
-        // 9.99 USD
-        /(\d{1,4}(?:\.\d{2})?)\s*(USD|EUR|GBP|INR|CAD|AUD)/gi,
+        // USD 9.99, EUR 9.99, INR 649
+        /(USD|EUR|GBP|INR|CAD|AUD)\s*(\d{1,5}(?:\.\d{2})?)/gi,
+        // 9.99 USD, 649 INR
+        /(\d{1,5}(?:\.\d{2})?)\s*(USD|EUR|GBP|INR|CAD|AUD)/gi,
     ];
 
     const amounts: Array<{ amount: number; currency: string }> = [];
@@ -101,7 +101,10 @@ export function extractAmount(text: string): { amount: number | null; currency: 
             let amount: number;
             let currency: string;
 
-            if (match[0].startsWith('$')) {
+            if (match[0].startsWith('₹')) {
+                amount = parseFloat(match[1].replace(',', ''));
+                currency = 'INR';
+            } else if (match[0].startsWith('$')) {
                 amount = parseFloat(match[1].replace(',', '.'));
                 currency = 'USD';
             } else if (match[0].startsWith('€')) {
@@ -110,12 +113,9 @@ export function extractAmount(text: string): { amount: number | null; currency: 
             } else if (match[0].startsWith('£')) {
                 amount = parseFloat(match[1].replace(',', '.'));
                 currency = 'GBP';
-            } else if (match[0].startsWith('₹')) {
-                amount = parseFloat(match[1].replace(',', '.'));
-                currency = 'INR';
             } else if (match[2]) {
                 // Currency code format
-                amount = parseFloat(match[2].replace(',', '.'));
+                amount = parseFloat(match[2].replace(',', ''));
                 currency = match[1].toUpperCase();
             } else {
                 continue;
@@ -141,8 +141,8 @@ export function extractBillingCycle(text: string): 'MONTHLY' | 'YEARLY' | 'QUART
     const textLower = text.toLowerCase();
 
     const patterns = {
-        MONTHLY: ['monthly', 'per month', '/month', 'billed monthly', 'every month'],
-        YEARLY: ['yearly', 'annually', 'per year', '/year', 'annual', 'billed yearly', 'every year'],
+        MONTHLY: ['monthly', 'per month', '/month', 'billed monthly', 'every month', 'month-to-month'],
+        YEARLY: ['yearly', 'annually', 'per year', '/year', 'annual', 'billed yearly', 'every year', 'year-to-year'],
         QUARTERLY: ['quarterly', 'per quarter', 'every 3 months', '3-month'],
         WEEKLY: ['weekly', 'per week', '/week', 'every week'],
     };
@@ -162,27 +162,66 @@ export function extractBillingCycle(text: string): 'MONTHLY' | 'YEARLY' | 'QUART
 // extracting plan name 
 export function extractPlanName(text: string): string | null {
   const planPatterns = [
-    /(?:plan|subscription):\s*([A-Za-z0-9\s]+?)(?:\n|$|,)/i,
-    /([A-Za-z\s]+?)\s+(?:plan|subscription|membership)/i,
-    /(premium|pro|basic|standard|plus|family|student|individual)\s+(?:plan|subscription)?/i,
+    // "Plan: Premium", "Subscription: Basic"
+    /(?:plan|subscription):\s*([A-Za-z0-9\s]+?)(?:\n|$|,|\.|;)/i,
+    // "Premium plan", "Basic subscription"
+    /(premium|pro|basic|standard|plus|family|student|individual|mobile|ultra hd|hd)\s+(?:plan|subscription|membership)?/i,
+    // "You're on the Premium plan"
+    /on\s+the\s+([A-Za-z0-9\s]+?)\s+(?:plan|subscription)/i,
   ];
 
   // comparing patterns with texts 
   for (const pattern of planPatterns) {
     const match = text.match(pattern);
     
-    // match[0] → "Plan: Premium Plus"
-    // match[1] → "Premium Plus
     if (match && match[1]) {
-      return match[1].trim();
+      const planName = match[1].trim();
+      
+      // Filter out junk matches
+      if (planName.length > 2 && planName.length < 50 && !planName.includes('by Netflix')) {
+        return planName;
+      }
     }
   }
 
   return null;
 }
 
-// extracting dates 
+// ✅ IMPROVED: Much stricter date validation
+export function isValidSubscriptionDate(date: Date | null): boolean {
+    if (!date) return false;
+    
+    // Check if date is actually a valid Date object
+    if (!(date instanceof Date) || isNaN(date.getTime())) {
+        return false;
+    }
+    
+    const now = new Date();
+    
+    // ✅ CRITICAL FIX: Much tighter bounds
+    // Past: Allow up to 3 years ago (longer subscription history)
+    const threeYearsAgo = new Date(now.getFullYear() - 3, now.getMonth(), now.getDate());
+    
+    // Future: Only allow 1 year ahead for renewals (NOT 5 years!)
+    // Most subscriptions renew monthly/yearly, so 1 year is plenty
+    const oneYearAhead = new Date(now.getFullYear() + 1, now.getMonth(), now.getDate());
+    
+    const isValid = date >= threeYearsAgo && date <= oneYearAhead;
+    
+    // ✅ DEBUG: Log rejected dates
+    if (!isValid) {
+        console.log('[Parser] Rejected invalid date:', {
+            date: date.toISOString(),
+            reason: date < threeYearsAgo ? 'too far in past' : 'too far in future',
+            threeYearsAgo: threeYearsAgo.toISOString(),
+            oneYearAhead: oneYearAhead.toISOString()
+        });
+    }
+    
+    return isValid;
+}
 
+// ✅ IMPROVED: Better date extraction with context awareness
 export function extractSubscriptionDates(
   body: string,
   emailDate?: string | null
@@ -193,46 +232,41 @@ export function extractSubscriptionDates(
 } {
   const text = body;
 
-  // Using chrono-node for natural language date parsing
-  // mgith return:
-  // start: { date: 2026-03-15 }
-  const parsedDates = parseDate(text);
-
   let startedAt: Date | null = null;
   let renewalDate: Date | null = null;
   let trialEndDate: Date | null = null;
 
-  // Looking for specific date contexts
+  // ✅ IMPROVED: More specific patterns
   const renewalPatterns = [
-    /(?:renew|renewal|next billing|will be charged)(?:\s+on|\s+date)?:?\s*([^.\n]+)/gi,
-    /(?:subscription|membership)\s+(?:renews|ends)\s+(?:on\s+)?([^.\n]+)/gi,
+    /(?:next billing|next payment|will be charged|will renew)(?:\s+on|\s+date)?:?\s*([^.\n]{5,30})/gi,
+    /(?:renew|renewal)\s+(?:date|on)?:?\s*([^.\n]{5,30})/gi,
+    /(?:subscription|membership)\s+(?:renews|ends)\s+(?:on\s+)?([^.\n]{5,30})/gi,
   ];
 
   const trialPatterns = [
-    /trial\s+ends?\s+(?:on\s+)?([^.\n]+)/gi,
-    /free\s+(?:trial\s+)?(?:ends|until)\s+([^.\n]+)/gi,
+    /trial\s+ends?\s+(?:on\s+)?([^.\n]{5,30})/gi,
+    /free\s+(?:trial\s+)?(?:ends|until)\s+([^.\n]{5,30})/gi,
   ];
 
   const startPatterns = [
-    /(?:subscription|membership)\s+(?:started|begins|active\s+since)\s+([^.\n]+)/gi,
-    /(?:plan|subscription)\s+start(?:s|ed)?\s+(?:date|on)?:?\s*([^.\n]+)/gi,
+    /(?:subscription|membership|plan)\s+(?:started|began|active\s+since)\s+([^.\n]{5,30})/gi,
+    /(?:joined|subscribed|signed up)\s+(?:on\s+)?([^.\n]{5,30})/gi,
   ];
 
   // Extracting renewal dates
   for (const pattern of renewalPatterns) {
-    // might return:["renews on March 15, 2026", "March 15, 2026"]\
-    // match[0] = full matched text
-    // match[1] = captured group (the date part)
     const matches = [...text.matchAll(pattern)];
 
     for (const match of matches) {
-      // only parsing date part
       const parsed = parseDate(match[1]);
       if (parsed && parsed.length > 0) {
-
-        // renewal date becomes: Date("2026-03-15")
-        renewalDate = parsed[0].start.date();
-        break;
+        const date = parsed[0].start.date();
+        
+        if (isValidSubscriptionDate(date)) {
+          renewalDate = date;
+          console.log('[Parser] Found renewal date:', date.toISOString(), 'from:', match[1]);
+          break;
+        }
       }
     }
     if (renewalDate) break;
@@ -244,8 +278,13 @@ export function extractSubscriptionDates(
     for (const match of matches) {
       const parsed = parseDate(match[1]);
       if (parsed && parsed.length > 0) {
-        trialEndDate = parsed[0].start.date();
-        break;
+        const date = parsed[0].start.date();
+        
+        if (isValidSubscriptionDate(date)) {
+          trialEndDate = date;
+          console.log('[Parser] Found trial end date:', date.toISOString(), 'from:', match[1]);
+          break;
+        }
       }
     }
     if (trialEndDate) break;
@@ -257,38 +296,34 @@ export function extractSubscriptionDates(
     for (const match of matches) {
       const parsed = parseDate(match[1]);
       if (parsed && parsed.length > 0) {
-        startedAt = parsed[0].start.date();
-        break;
+        const date = parsed[0].start.date();
+        
+        if (isValidSubscriptionDate(date)) {
+          startedAt = date;
+          console.log('[Parser] Found start date:', date.toISOString(), 'from:', match[1]);
+          break;
+        }
       }
     }
     if (startedAt) break;
   }
 
-  // If no specific dates found, use chrono-node on full text
-  if (!renewalDate && !startedAt && parsedDates.length > 0) {
-    // First date is likely start, last date is likely renewal
-
-    // if only 1 date is found it is more likely to be renewal date 
-    if (parsedDates.length === 1) {
-      // using top date
-      renewalDate = parsedDates[0].start.date();
-    }
-
-    // and if 2 dates are found First date is likely start, last date is likely renewal
-    else if (parsedDates.length >= 2) {
-      startedAt = parsedDates[0].start.date();
-
-      // we want element at index n, so length - 1. 
-      // eg. if length of array must be 3 and we want last element which must be at 2nd index position we use 3-1.
-      renewalDate = parsedDates[parsedDates.length - 1].start.date();
-    }
-  }
-
-  // Fallback: if no explicit start date, using email header date
+  // ✅ CRITICAL FIX: Use email date directly (not chrono-node parsing)
+  // Fallback: if no explicit start date, use email header date
   if (!startedAt && emailDate) {
-    const parsed = parseDate(emailDate);
-    if (parsed && parsed.length > 0) {
-      startedAt = parsed[0].start.date();
+    try {
+      // Gmail sends dates like "Tue, 15 Jan 2025 10:30:00 GMT"
+      // Direct conversion preserves timezone and is accurate
+      const date = new Date(emailDate);
+      
+      if (isValidSubscriptionDate(date)) {
+        startedAt = date;
+        console.log('[Parser] Using email date as start date:', date.toISOString());
+      } else {
+        console.warn('[Parser] Email date is invalid:', emailDate, '→', date.toISOString());
+      }
+    } catch (error) {
+      console.error('[Parser] Error parsing email date:', emailDate, error);
     }
   }
 
@@ -308,30 +343,25 @@ export function extractAllSubscriptionData(
 ): ExtractedSubscriptionData {
   const fullText = `${body}\n${pdfText}`;
 
-  /*
-  if 
-    return {
-      a: 5,
-      ...someFunction(),
-      b: 30
-    };
-
-    using '...'
-    {
-      a: 5,
-      v1: 10,
-      v2: 20,
-      b: 30
-    }
-
-      */
-
-  return {
+  console.log('[Parser] Extracting data from email dated:', emailDate);
+  
+  const extracted = {
     provider: extractProviderName(fromHeader, fullText),
     ...extractAmount(fullText),
     billingCycle: extractBillingCycle(fullText),
     ...extractSubscriptionDates(fullText, emailDate),
     planName: extractPlanName(fullText),
   };
+  
+  console.log('[Parser] Extraction complete:', {
+    provider: extracted.provider,
+    amount: extracted.amount,
+    currency: extracted.currency,
+    billingCycle: extracted.billingCycle,
+    planName: extracted.planName,
+    startedAt: extracted.startedAt?.toISOString(),
+    renewalDate: extracted.renewalDate?.toISOString(),
+  });
+  
+  return extracted;
 }
-                                                                    

@@ -36,20 +36,34 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJmMTkzY
 GET http://localhost:5000/api/dashboard
 
 ###
+POST http://localhost:5000/gmail/historical-scan
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI1OGE4NDE0ZC03OWZmLTQ4ZmEtOGNjMC03ZjZkZjRlNDU4NTYiLCJlbWFpbCI6ImRldmFuc2hrYXBhZGlhMDBAZ21haWwuY29tIiwiaWF0IjoxNzcwOTc0MjY2LCJleHAiOjE3NzA5ODUwNjZ9.eGmJf5VOXCPqDCNmHxk3JuQj9Vk0eH5fNKUYEM5dsu0
+
+###
 GET http://localhost:5000/api/subscriptions
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI1OGE4NDE0ZC03OWZmLTQ4ZmEtOGNjMC03ZjZkZjRlNDU4NTYiLCJlbWFpbCI6ImRldmFuc2hrYXBhZGlhMDBAZ21haWwuY29tIiwiaWF0IjoxNzcwOTc0MjY2LCJleHAiOjE3NzA5ODUwNjZ9.eGmJf5VOXCPqDCNmHxk3JuQj9Vk0eH5fNKUYEM5dsu0
 
 ###
-GET http://localhost:5000/api/subscriptions/87303b15-755f-4fc7-88d9-85ea71d0e947
+GET http://localhost:5000/api/subscriptions/cc660741-ef4d-4d1f-8dc5-bf8102fba081
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI1OGE4NDE0ZC03OWZmLTQ4ZmEtOGNjMC03ZjZkZjRlNDU4NTYiLCJlbWFpbCI6ImRldmFuc2hrYXBhZGlhMDBAZ21haWwuY29tIiwiaWF0IjoxNzcwOTc0MjY2LCJleHAiOjE3NzA5ODUwNjZ9.eGmJf5VOXCPqDCNmHxk3JuQj9Vk0eH5fNKUYEM5dsu0
 
 ###
-POST http://localhost:5000/api/subscriptions/87303b15-755f-4fc7-88d9-85ea71d0e947/confirm
+POST http://localhost:5000/api/subscriptions/cc660741-ef4d-4d1f-8dc5-bf8102fba081/confirm
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI1OGE4NDE0ZC03OWZmLTQ4ZmEtOGNjMC03ZjZkZjRlNDU4NTYiLCJlbWFpbCI6ImRldmFuc2hrYXBhZGlhMDBAZ21haWwuY29tIiwiaWF0IjoxNzcwOTc0MjY2LCJleHAiOjE3NzA5ODUwNjZ9.eGmJf5VOXCPqDCNmHxk3JuQj9Vk0eH5fNKUYEM5dsu0
 
 ###
-POST http://localhost:5000/gmail/historical-scan
+DELETE http://localhost:5000/api/subscriptions/87303b15-755f-4fc7-88d9-85ea71d0e947
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI1OGE4NDE0ZC03OWZmLTQ4ZmEtOGNjMC03ZjZkZjRlNDU4NTYiLCJlbWFpbCI6ImRldmFuc2hrYXBhZGlhMDBAZ21haWwuY29tIiwiaWF0IjoxNzcwOTc0MjY2LCJleHAiOjE3NzA5ODUwNjZ9.eGmJf5VOXCPqDCNmHxk3JuQj9Vk0eH5fNKUYEM5dsu0
+
+###
+PATCH  http://localhost:5000/api/subscriptions/f1019a70-f62d-407f-99eb-4d83d9570c42
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI1OGE4NDE0ZC03OWZmLTQ4ZmEtOGNjMC03ZjZkZjRlNDU4NTYiLCJlbWFpbCI6ImRldmFuc2hrYXBhZGlhMDBAZ21haWwuY29tIiwiaWF0IjoxNzcwOTc0MjY2LCJleHAiOjE3NzA5ODUwNjZ9.eGmJf5VOXCPqDCNmHxk3JuQj9Vk0eH5fNKUYEM5dsu0
+Content-Type: application/json
+
+{
+    "amount": 649
+}
+
 
 ###
 GET http://localhost:5000/api/subscriptions/upcoming-renewals

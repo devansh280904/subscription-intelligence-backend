@@ -1,12 +1,12 @@
-import { 
-  CANCELLATION_KEYWORDS, 
-  CONFIRMATION_KEYWORDS, 
-  TRIAL_ENDING_KEYWORDS,
-  NEGATIVE_KEYWORDS, 
-  PAYMENT_FAILED_KEYWORDS, 
-  PLAN_LIFECYCLE_KEYWORDS, 
-  POSITIVE_KEYWORDS, 
-  SECURITY_KEYWORDS } from "./gmail.rules";
+import {
+  CANCELLATION_KEYWORDS,
+  CONFIRMATION_KEYWORDS,
+  NEGATIVE_KEYWORDS,
+  PAYMENT_FAILED_KEYWORDS,
+  PLAN_LIFECYCLE_KEYWORDS,
+  POSITIVE_KEYWORDS,
+  SECURITY_KEYWORDS,
+} from './gmail.rules';
 
 export interface EmailHeaders {
   from: string | null;
@@ -21,9 +21,49 @@ export interface ClassificationResult {
   confidence: 'HIGH' | 'MEDIUM' | 'LOW';
 }
 
+/**
+ * CRITICAL FIX: Verify email is FROM the provider, not just mentioning them
+ */
+function isFromProvider(fromHeader: string | null, body: string): boolean {
+  if (!fromHeader) return false;
+  
+  const from = fromHeader.toLowerCase();
+  
+  // List of known subscription provider domains
+  const providerDomains = [
+    'netflix.com',
+    'nflx.net',
+    'linkedin.com',
+    'spotify.com',
+    'apple.com',
+    'openai.com',
+    'adobe.com',
+    'notion.so',
+    'github.com',
+    'microsoft.com',
+    'google.com',
+    'amazon.com',
+    'primevideo.com',
+    'youtube.com',
+    'disney',
+    'hulu.com',
+    'hbomax.com',
+    'canva.com',
+    'figma.com',
+    'dropbox.com',
+    'zoom.us',
+  ];
+  
+  // Email must be FROM a provider domain
+  for (const domain of providerDomains) {
+    if (from.includes(domain)) {
+      return true;
+    }
+  }
+  
+  return false;
+}
 
-// expects headers to match the EmailHeaders type
-// returns a value that matches the ClassificationResult type
 export function classifySubscriptionEmail(
   headers: EmailHeaders,
   body?: string
@@ -31,7 +71,17 @@ export function classifySubscriptionEmail(
   const from = (headers.from || '').toLowerCase();
   const subject = (headers.subject || '').toLowerCase();
   const text = `${subject} ${body || ''}`.toLowerCase();
-  
+
+  // 🔴 CRITICAL FIX: Reject if not from a known provider
+  if (!isFromProvider(headers.from, body || '')) {
+    return {
+      isSubscriptionCandidate: false,
+      score: -100,
+      reasons: ['Email not from a known subscription provider'],
+      confidence: 'HIGH',
+    };
+  }
+
   // 🟢 Confirmation detection (highest priority)
   for (const k of CONFIRMATION_KEYWORDS) {
     if (text.includes(k)) {
@@ -71,9 +121,16 @@ export function classifySubscriptionEmail(
     }
   }
 
+  // 🟡 Trial ending detection
+  const trialEndingKeywords = [
+    'trial ends',
+    'trial ending',
+    'free trial expires',
+    'trial expires',
+    'trial period ends',
+  ];
 
-  // tiral ending
-  for (const k of TRIAL_ENDING_KEYWORDS) {
+  for (const k of trialEndingKeywords) {
     if (text.includes(k)) {
       return {
         isSubscriptionCandidate: true,
@@ -153,36 +210,12 @@ export function classifySubscriptionEmail(
     }
   }
 
-  // 🧠 Known subscription providers
-  const knownProviders = [
-    'netflix',
-    'spotify',
-    'google play',
-    'apple',
-    'adobe',
-    'notion',
-    'github',
-    'canva',
-    'figma',
-    'aws',
-    'azure',
-    'linkedin',
-    'youtube',
-    'discord',
-    'dropbox',
-    'zoom',
-    'microsoft',
-    'chatgpt',
-    'openai',
-  ];
-
-  if (knownProviders.some((p) => from.includes(p) || text.includes(p))) {
-    score += 4;
-    reasons.push('Known subscription provider');
-  }
+  // 🧠 Verified from known provider - already checked above
+  score += 4;
+  reasons.push('From verified subscription provider');
 
   // 💰 Currency/amount detection (good signal)
-  const hasCurrency = /[$€£¥₹]\s*\d+/.test(text);
+  const hasCurrency = /[₹$€£¥]\s*\d+/.test(text);
   if (hasCurrency) {
     score += 2;
     reasons.push('Contains pricing information');

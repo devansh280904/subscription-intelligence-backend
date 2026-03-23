@@ -2,7 +2,7 @@ import { AuthRequest } from "../../middlewares/auth.middleware";
 import { Response } from "express";
 import { getGmailauthUrl, testGmailConnection } from "./gmail.service";
 import { enqueueJob } from "./gmail.queue";
-import { runHistoricalGmailScan } from "./gmail.historical.scan.worker";
+import { runHistoricalScan } from "./gmail.historical.scan.worker";
 import prisma from '../../config/prisma';
 import { fetchGmailMessageContent, fetchGmailMessageHeaders, scanGmailMessageIds } from './gmail.scanner';
 import { classifySubscriptionEmail } from './gmail.classifier';
@@ -29,7 +29,7 @@ export const startHistoricalScan = async (req: AuthRequest, res: Response) => {
         })
     }
 
-    enqueueJob(() => runHistoricalGmailScan(userId));
+    enqueueJob(() => runHistoricalScan(userId));
 
     return res.json({
         message: 'historical Gmail scan started this may take a few minutes'

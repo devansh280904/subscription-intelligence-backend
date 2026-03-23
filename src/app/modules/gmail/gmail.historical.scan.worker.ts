@@ -1,208 +1,307 @@
-import prisma from '../../config/prisma'
+import prisma from '../../config/prisma';
 import {
-    scanGmailMessageIds,
-    fetchGmailMessageHeaders,
-    fetchGmailMessageContent,
-} from './gmail.scanner'
-import { classifySubscriptionEmail } from './gmail.classifier'
-import { processSubscriptionEmail } from './gmail.worker'
+  scanGmailMessageIds,
+  fetchGmailMessageHeaders,
+  fetchGmailMessageContent,
+} from './gmail.scanner';
+import { classifySubscriptionEmail } from './gmail.classifier';
+import { extractAllSubscriptionData } from './gmail.parser';
+import { SubscriptionStatus } from '@prisma/client';
 
-const PAGE_SIZE = 50;
-const MAX_EMAILS_TO_SCAN = 2000;
-const MAX_SUBSCRIPTIONS_TO_FIND = 30;
+/**
+ * Improved Historical Gmail Scanner (No LLM)
+ * Fixes: 
+ * 1. Scans from Oct 2025 (includes your confirmation email)
+ * 2. Processes confirmation emails FIRST
+ * 3. Then processes chronologically (oldest to newest)
+ */
 
-// ✅ NEW: Track scan statistics
-interface ScanStats {
-    scannedCount: number;
-    foundSubscriptions: number;
-    errors: number;
-    skipped: number;
+interface EmailToProcess {
+  messageId: string;
+  date: Date;
+  priority: number;
+  subject: string;
 }
 
-export async function runHistoricalGmailScan(userId: string) {
-    console.log('[Scan] Historical scan started for user:', userId);
+// Helper function to map lifecycle to status
+function mapLifecycleToStatus(lifecycleEvent?: string): SubscriptionStatus {
+  switch (lifecycleEvent) {
+    case 'CANCELLED':
+      return SubscriptionStatus.CANCELLED;
+    case 'PAYMENT_FAILED':
+      return SubscriptionStatus.PAYMENT_FAILED;
+    case 'TRIAL_ENDING':
+      return SubscriptionStatus.TRIAL;
+    default:
+      return SubscriptionStatus.ACTIVE;
+  }
+}
 
-    const gmailAccount = await prisma.gmailAccount.findUnique({
-        where: { userId },
-    });
+export async function runHistoricalScan(userId: string): Promise<void> {
+  console.log(`🚀 Starting historical scan for user ${userId}`);
 
-    if (!gmailAccount) {
-        throw new Error('gmail account not found');
-    }
+  const gmailAccount = await prisma.gmailAccount.findUnique({
+    where: { userId },
+  });
 
-    if (gmailAccount.historicalScanCompleted) {
-        console.log('[Scan] Historical scan already completed');
-        return;
-    }
+  if (!gmailAccount) {
+    throw new Error('Gmail account not found');
+  }
 
-    const stats: ScanStats = {
-        scannedCount: 0,
-        foundSubscriptions: 0,
-        errors: 0,
-        skipped: 0,
-    };
+  // ✅ FIX 1: Include emails from Oct 2025 onwards
+  const searchQuery = 'subscription OR billing OR invoice OR receipt after:2025/10/01';
+  
+  console.log(`🔍 Search query: ${searchQuery}`);
 
-    let pageToken: string | undefined;
+  let allMessageIds: string[] = [];
+  let pageToken: string | undefined = undefined;
+  let pageCount = 0;
+  const MAX_PAGES = 20;
 
+  // Fetch all message IDs
+  do {
+    const response = await scanGmailMessageIds(
+      gmailAccount.accessToken,
+      gmailAccount.refreshToken,
+      {
+        maxResults: 100,
+        query: searchQuery,
+        pageToken,
+      }
+    );
+
+    allMessageIds.push(...response.messageIds);
+    pageToken = response.nextPageToken;
+    pageCount++;
+
+    console.log(`📄 Fetched page ${pageCount}, total messages: ${allMessageIds.length}`);
+  } while (pageToken && pageCount < MAX_PAGES);
+
+  console.log(`📊 Total messages to process: ${allMessageIds.length}`);
+
+  // ✅ FIX 2: Fetch headers and assign priorities
+  const emailsToProcess: EmailToProcess[] = [];
+
+  for (const messageId of allMessageIds) {
     try {
-        while (true) {
-            // ✅ IMPROVED: Better error handling for API calls
-            let response;
-            try {
-                response = await scanGmailMessageIds(
-                    gmailAccount.accessToken,
-                    gmailAccount.refreshToken, 
-                    {
-                        maxResults: PAGE_SIZE,
-                        pageToken,
-                        query: `
-                            subscription OR
-                            billing OR
-                            renewal OR
-                            membership OR
-                            trial OR
-                            "update payment" OR
-                            invoice OR
-                            receipt
-                        `,
-                    }
-                );
-            } catch (error) {
-                console.error('[Scan] Fatal error fetching message IDs:', error);
-                // Break the loop on critical API errors
-                break;
-            }
+      const headers = await fetchGmailMessageHeaders(
+        gmailAccount.accessToken,
+        gmailAccount.refreshToken,
+        messageId
+      );
 
-            const messageIds = response.messageIds;
-            pageToken = response.nextPageToken;
+      const classification = classifySubscriptionEmail(
+        {
+          from: headers.from,
+          subject: headers.subject,
+        },
+        ''
+      );
 
-            if (!messageIds || messageIds.length === 0) break;
+      if (!classification.isSubscriptionCandidate) {
+        console.log(`⏭️  Skipping: ${headers.subject}`);
+        continue;
+      }
 
-            console.log(`[Scan] Processing batch of ${messageIds.length} messages...`);
+      let priority = 3;
+      const subject = (headers.subject || '').toLowerCase();
 
-            for (const messageId of messageIds) {
-                stats.scannedCount++;
-                
-                try {
-                    const headers = await fetchGmailMessageHeaders(
-                        gmailAccount.accessToken,
-                        gmailAccount.refreshToken,
-                        messageId
-                    );
+      if (
+        subject.includes('subscription confirmed') ||
+        subject.includes('subscription is confirmed') ||
+        subject.includes('welcome to your subscription') ||
+        subject.includes('thank you for subscribing')
+      ) {
+        priority = 1;
+        console.log(`🎯 PRIORITY 1 (Confirmation): ${headers.subject}`);
+      } else if (
+        subject.includes('receipt') ||
+        subject.includes('payment successful') ||
+        subject.includes('your payment')
+      ) {
+        priority = 2;
+        console.log(`💰 PRIORITY 2 (Payment): ${headers.subject}`);
+      } else {
+        console.log(`📧 PRIORITY 3 (Other): ${headers.subject}`);
+      }
 
-                    let classification = classifySubscriptionEmail({
-                        from: headers.from,
-                        subject: headers.subject,
-                    });
-
-                    // ✅ IMPROVED: Better classification thresholds
-                    if (classification.score >= 2 && classification.score < 6) {
-                        try {
-                            const response = await fetchGmailMessageContent(
-                                gmailAccount.accessToken,
-                                gmailAccount.refreshToken,
-                                messageId
-                            );
-                            const body = response.bodyText;
-                            
-                            classification = classifySubscriptionEmail(
-                                {
-                                    from: headers.from,
-                                    subject: headers.subject,
-                                },
-                                body
-                            );
-                        } catch (error) {
-                            console.error(`[Scan] Error fetching message content ${messageId}:`, error);
-                            stats.errors++;
-                            continue;
-                        }
-                    }
-
-                    if (
-                        classification.isSubscriptionCandidate &&
-                        classification.score >= 6 &&
-                        headers.from
-                    ) {
-                        let lifecycleEvent: 'ACTIVE' | 'CANCELLED' | 'PAYMENT_FAILED' | undefined;
-
-                        if (classification.lifecycleEvent === 'ACTIVE') {
-                            lifecycleEvent = 'ACTIVE';
-                        } else if (classification.lifecycleEvent === 'CANCELLED') {
-                            lifecycleEvent = 'CANCELLED';
-                        } else if (classification.lifecycleEvent === 'PAYMENT_FAILED') {
-                            lifecycleEvent = 'PAYMENT_FAILED';
-                        }
-                        
-                        try {
-                            await processSubscriptionEmail(
-                                userId,
-                                messageId,
-                                headers.from,
-                                gmailAccount.accessToken,
-                                gmailAccount.refreshToken,
-                                lifecycleEvent,
-                                headers.date,
-                            );
-                            stats.foundSubscriptions++;
-
-                            console.log(`[Scan] ✅ Found Subscription ${stats.foundSubscriptions}/${MAX_SUBSCRIPTIONS_TO_FIND}`, {
-                                provider: headers.from?.split('@')[1]?.split('.')[0],
-                                event: lifecycleEvent,
-                                score: classification.score,
-                            });
-                        } catch (error) {
-                            console.error(`[Scan] Error processing subscription ${messageId}:`, error);
-                            stats.errors++;
-                        }
-                    } else {
-                        stats.skipped++;
-                    }
-                } catch (error) {
-                    console.error(`[Scan] Error processing message ${messageId}:`, error);
-                    stats.errors++;
-                }
-
-                // checking if we should stop scanning
-                if (
-                    stats.scannedCount >= MAX_EMAILS_TO_SCAN ||
-                    stats.foundSubscriptions >= MAX_SUBSCRIPTIONS_TO_FIND
-                ) {
-                    console.log('[Scan] Reached scan limits, stopping...');
-                    break;
-                }
-            }
-
-            // checking exit conditions
-            if (
-                stats.scannedCount >= MAX_EMAILS_TO_SCAN ||
-                stats.foundSubscriptions >= MAX_SUBSCRIPTIONS_TO_FIND ||
-                !pageToken
-            ) {
-                break;
-            }
-
-            // ✅ NEW: Small delay between pages to avoid rate limits
-            await new Promise(resolve => setTimeout(resolve, 100));
-        }
+      emailsToProcess.push({
+        messageId,
+        date: new Date(headers.date || Date.now()),
+        priority,
+        subject: headers.subject || '',
+      });
     } catch (error) {
-        console.error('[Scan] Critical error during scan:', error);
-        throw error;
-    } finally {
-        // ✅ IMPROVED: Always update scan status with final stats
-        await prisma.gmailAccount.update({
-            where: { userId },
-            data: {
-                historicalScanCompleted: true,
-                lastScannedAt: new Date(),
-            },
+      console.error(`❌ Error fetching headers for ${messageId}:`, error);
+    }
+  }
+
+  // ✅ FIX 3: Sort by priority FIRST, then by date
+  emailsToProcess.sort((a, b) => {
+    if (a.priority !== b.priority) {
+      return a.priority - b.priority;
+    }
+    return a.date.getTime() - b.date.getTime();
+  });
+
+  console.log(`\n📋 Processing order:`);
+  console.log(`   - ${emailsToProcess.filter(e => e.priority === 1).length} confirmation emails`);
+  console.log(`   - ${emailsToProcess.filter(e => e.priority === 2).length} payment emails`);
+  console.log(`   - ${emailsToProcess.filter(e => e.priority === 3).length} other emails`);
+
+  let processedCount = 0;
+  let skippedCount = 0;
+  let errorCount = 0;
+
+  for (const email of emailsToProcess) {
+    try {
+      console.log(`\n📧 [Priority ${email.priority}] ${email.subject.substring(0, 50)}...`);
+      console.log(`   Date: ${email.date.toISOString()}`);
+
+      const headers = await fetchGmailMessageHeaders(
+        gmailAccount.accessToken,
+        gmailAccount.refreshToken,
+        email.messageId
+      );
+
+      const { bodyText, pdfText } = await fetchGmailMessageContent(
+        gmailAccount.accessToken,
+        gmailAccount.refreshToken,
+        email.messageId
+      );
+
+      const classification = classifySubscriptionEmail(
+        {
+          from: headers.from,
+          subject: headers.subject,
+        },
+        bodyText
+      );
+
+      if (!classification.isSubscriptionCandidate) {
+        console.log(`⏭️  Skipped after full classification`);
+        skippedCount++;
+        continue;
+      }
+
+      // Extract subscription data
+      const extracted = extractAllSubscriptionData(
+        headers.from,
+        bodyText,
+        pdfText,
+        headers.date
+      );
+
+      if (!extracted.provider) {
+        console.log(`⚠️  No provider extracted, skipping`);
+        skippedCount++;
+        continue;
+      }
+
+      // Find or create subscription
+      let subscription = await prisma.subscription.findFirst({
+        where: {
+          userId,
+          provider: extracted.provider,
+        },
+      });
+
+      if (!subscription) {
+        // Create new subscription
+        subscription = await prisma.subscription.create({
+          data: {
+            userId,
+            provider: extracted.provider,
+            status: mapLifecycleToStatus(classification.lifecycleEvent),
+            startedAt: extracted.startedAt,
+            amount: extracted.amount,
+            currency: extracted.currency,
+            billingCycle: extracted.billingCycle,
+            renewalDate: extracted.renewalDate,
+            planName: extracted.planName,
+            lastEmailDate: new Date(headers.date || Date.now()),
+            needsConfirmation: true,
+          },
         });
 
-        console.log('[Scan] Historical Scan Completed', {
-            scanned: stats.scannedCount,
-            found: stats.foundSubscriptions,
-            errors: stats.errors,
-            skipped: stats.skipped,
+        console.log(`✅ Created subscription: ${extracted.provider}`);
+      } else {
+        // Update existing subscription
+        const updateData: any = {
+          lastEmailDate: new Date(headers.date || Date.now()),
+        };
+
+        if (extracted.amount) updateData.amount = extracted.amount;
+        if (extracted.currency) updateData.currency = extracted.currency;
+        if (extracted.billingCycle) updateData.billingCycle = extracted.billingCycle;
+        if (extracted.renewalDate) updateData.renewalDate = extracted.renewalDate;
+        if (extracted.planName) updateData.planName = extracted.planName;
+
+        const newStatus = mapLifecycleToStatus(classification.lifecycleEvent);
+        if (newStatus === SubscriptionStatus.CANCELLED) {
+          updateData.status = SubscriptionStatus.CANCELLED;
+          updateData.endedAt = new Date(headers.date || Date.now());
+        } else if (newStatus === SubscriptionStatus.PAYMENT_FAILED) {
+          updateData.status = SubscriptionStatus.PAYMENT_FAILED;
+        } else if (extracted.amount) {
+          updateData.status = SubscriptionStatus.ACTIVE;
+          updateData.endedAt = null;
+        }
+
+        subscription = await prisma.subscription.update({
+          where: { id: subscription.id },
+          data: updateData,
         });
+
+        console.log(`📝 Updated subscription: ${extracted.provider}`);
+      }
+
+      // Create payment cycle if amount exists
+      if (extracted.amount && extracted.amount > 0) {
+        const existingCycle = await prisma.paymentCycle.findFirst({
+          where: {
+            subscriptionId: subscription.id,
+            emailMessageId: email.messageId,
+          },
+        });
+
+        if (!existingCycle) {
+          await prisma.paymentCycle.create({
+            data: {
+              subscriptionId: subscription.id,
+              amount: extracted.amount,
+              currency: extracted.currency || 'INR',
+              paymentDate: new Date(headers.date || Date.now()),
+              status: classification.lifecycleEvent === 'PAYMENT_FAILED' ? 'FAILED' : 'SUCCESS',
+              emailMessageId: email.messageId,
+            },
+          });
+
+          console.log(`💰 Payment cycle: ₹${extracted.amount}`);
+        }
+      }
+
+      processedCount++;
+
+      // Small delay
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    } catch (error) {
+      console.error(`❌ Error processing ${email.messageId}:`, error);
+      errorCount++;
     }
+  }
+
+  // Update scan completion
+  await prisma.gmailAccount.update({
+    where: { userId },
+    data: {
+      historicalScanCompleted: true,
+      lastScannedAt: new Date(),
+    },
+  });
+
+  console.log(`\n✅ Historical scan completed!`);
+  console.log(`   - Processed: ${processedCount}`);
+  console.log(`   - Skipped: ${skippedCount}`);
+  console.log(`   - Errors: ${errorCount}`);
 }

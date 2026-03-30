@@ -1,8 +1,4 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+// prisma/schema.prisma
 
 generator client {
   provider = "prisma-client-js"
@@ -13,27 +9,26 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-
 model User {
   id        String   @id @default(uuid())
   email     String   @unique
-  googleSub String?   @unique
+  googleSub String?  @unique
+  name      String?                      // ← added
+  picture   String?                      // ← added
   createdAt DateTime @default(now())
 
-  gmailAccount GmailAccount?
+  gmailAccount  GmailAccount?
   subscriptions Subscription[]
 }
-
 
 model GmailAccount {
   id           String   @id @default(uuid())
   userId       String   @unique
-
   accessToken  String
   refreshToken String
   expiresAt    DateTime
 
-  historicalScanCompleted Boolean  @default(false)
+  historicalScanCompleted Boolean   @default(false)
   lastScannedAt           DateTime?
 
   user User @relation(fields: [userId], references: [id])
@@ -58,44 +53,38 @@ enum BillingCycle {
 }
 
 model Subscription {
-  id          String             @id @default(uuid())
-  userId      String
-  provider    String // e.g., "Netflix", "Spotify"
-  
-  // Status and lifecycle
-  status      SubscriptionStatus @default(ACTIVE)
-  startedAt   DateTime?
-  endedAt     DateTime?
-  
-  // Billing information
-  amount      Float?
-  currency    String?            @default("USD")
+  id       String @id @default(uuid())
+  userId   String
+  provider String
+
+  status   SubscriptionStatus @default(ACTIVE)
+  startedAt DateTime?
+  endedAt   DateTime?
+
+  amount       Float?
+  currency     String?      @default("USD")
   billingCycle BillingCycle?
-  renewalDate DateTime?
-  
-  // Additional metadata
-  planName    String? // e.g., "Premium", "Pro", "Family"
+  renewalDate  DateTime?
+
+  planName      String?
   lastEmailDate DateTime?
-  
-  // User confirmation system
-  needsConfirmation Boolean @default(true)
+
+  needsConfirmation Boolean  @default(true)
   confirmedAt       DateTime?
   userNotes         String?
-  
-  // AI extraction metadata
-  extractionConfidence Float? // 0-1 score
-  
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
 
-  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  extractionConfidence Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   paymentCycles PaymentCycle[]
-  
+
   @@unique([userId, provider])
   @@index([userId, status])
   @@index([renewalDate])
 }
-
 
 enum PaymentStatus {
   SUCCESS
@@ -105,26 +94,22 @@ enum PaymentStatus {
 }
 
 model PaymentCycle {
-  id             String        @id @default(uuid())
+  id             String @id @default(uuid())
   subscriptionId String
-  
-  // Payment details
-  amount         Float
-  currency       String        @default("USD")
-  paymentDate    DateTime
-  status         PaymentStatus @default(SUCCESS)
-  
-  // Email tracking
-  emailMessageId String?       @unique
-  
-  // Notes
-  notes          String?
-  
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
 
-  subscription   Subscription  @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
-  
+  amount      Float
+  currency    String        @default("USD")
+  paymentDate DateTime
+  status      PaymentStatus @default(SUCCESS)
+
+  emailMessageId String? @unique
+  notes          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
   @@index([subscriptionId, paymentDate])
   @@index([status])
 }

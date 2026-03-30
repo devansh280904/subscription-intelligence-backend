@@ -1,26 +1,37 @@
-import express  from 'express';
 import type { Request, Response } from 'express';
 import { authService } from './auth.service';
 
-export const googleAuthController = async (req: Request, res: Response) => {
+export const googleAuthController = async (req: Request, res: Response): Promise<any> => {
     try {
-        // fetching authorization code and code verifier from the client's login request 
-        const { code, codeVerifier } = req.body;
+        console.log('[Auth] Callback hit — body keys:', Object.keys(req.body));
 
-        //if either is not present sending the error message 
-        if(!code || ! codeVerifier){
-            return res.status(400).json({
-                message: 'Authorization code or code Verifier is missing'
-            })
+        // Only expect 'code' now
+        const { code } = req.body;
+
+        if (!code) {
+            return res.status(400).json({ message: 'Authorization code is missing' });
         }
 
-        // calling authservice to verifiy the token and code. And to generate new app token by sending them code and codeverifier.
-        const tokens = await authService.googleLogin(code, codeVerifier);
+        const appJwt = await authService.googleLogin(code);
 
-        return res.status(200).json({tokens})
-    } catch (error) {
-        res.status(500).json({
-            message: 'Google Authentication Failed',
+        console.log('[Auth] JWT generated successfully');
+
+        const payload: any = JSON.parse(
+            Buffer.from(appJwt.split('.')[1], 'base64').toString()
+        );
+
+        return res.status(200).json({
+            accessToken: appJwt,
+            user: {
+                id:      payload.userId,
+                email:   payload.email,
+                name:    payload.name    ?? payload.email,
+                picture: payload.picture ?? null,
+            }
         });
+
+    } catch (error: any) {
+        console.error('[Auth] Google authentication failed:', error?.message, error?.response?.data);
+        return res.status(500).json({ message: error?.message || 'Google Authentication Failed' });
     }
-}
+};

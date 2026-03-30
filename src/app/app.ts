@@ -1,28 +1,27 @@
+// src/app/app.ts
+import 'dotenv/config';
 import express from 'express';
-import routes from './routes';
-import gmailRoutes from './modules/gmail/gmail.routes'
 import cors from 'cors';
+import routes from './routes';
+import gmailRoutes from './modules/gmail/gmail.routes';
 import { errorHandler } from './middlewares/error.middleware';
 
 const app = express();
+
+// ── CORS ────────────────────────────────────────────────────────────
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-  credentials: true
+  origin: process.env.FRONTEND_URL || 'http://localhost:4200',
+  credentials: true,
 }));
-   app.use(errorHandler); // Add at the end, after all routes
-//middleware to parse json bodies
+
+// ── Body parsing ─────────────────────────────────────────────────────
 app.use(express.json());
 
-app.get('/auth/callback', (req, res) => {
-  const code = req.query.code;
-
-  res.json({
-    message: 'OAuth callback received successfully',
-    code
-  });
-});
-
+// ── Routes ───────────────────────────────────────────────────────────
 app.use('/api', routes);
-app.use('/gmail', gmailRoutes)
+app.use('/gmail', gmailRoutes);
 
-export default app
+// ── Error handler (must be LAST, after all routes) ───────────────────
+app.use(errorHandler);
+
+export default app;

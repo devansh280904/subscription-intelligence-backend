@@ -7,23 +7,34 @@ export const SECURITY_KEYWORDS = [
   'unusual activity',
   'password reset',
   'login alert',
+  'two-factor',
+  '2-step verification',
+  'enter this code',
+  'your otp',
 ];
+
 export const CONFIRMATION_KEYWORDS = [
   'your subscription has started',
   'welcome to',
   'you are now subscribed',
   'membership is active',
   'subscription is now active',
+  'thank you for subscribing',
+  'thanks for subscribing',
+  'subscription confirmed',
+  'your receipt from apple',
+  'apple id receipt',
+  'your google play order receipt',
+  'your google play receipt',
 ];
 
 export const TRIAL_ENDING_KEYWORDS = [
-    'trial ends',
-    'trial ending',
-    'free trial expires',
-    'trial expires',
-    'trial period ends',
-  ];
-
+  'trial ends',
+  'trial ending',
+  'free trial expires',
+  'trial expires',
+  'trial period ends',
+];
 
 export const PLAN_LIFECYCLE_KEYWORDS = [
   'trial ends',
@@ -38,33 +49,69 @@ export const PLAN_LIFECYCLE_KEYWORDS = [
   'changes to your plan',
   'subscription ends',
   'expires on',
+  'billed on',
+  'charged on',
+  'auto-renews on',
+  'renewal date',
 ];
 
 export const CANCELLATION_KEYWORDS = [
   'subscription cancelled',
+  'subscription canceled',
   'membership cancelled',
+  'membership canceled',
   'has been cancelled',
+  'has been canceled',
   'you have cancelled',
+  'you have canceled',
+  'you\'ve cancelled',
+  'you\'ve canceled',
   'will not renew',
+  'will not be renewed',
   'auto-renew turned off',
+  'auto-renewal turned off',
+  'we have canceled your',
+  'we\'ve canceled your',
+  'your subscription has ended',
+  'your membership has ended',
 ];
 
 export const PAYMENT_FAILED_KEYWORDS = [
   'payment failed',
+  'payment was declined',
+  'payment unsuccessful',
   'card declined',
   'could not process payment',
+  'unable to process payment',
   'billing issue',
+  'billing problem',
   'update your payment method',
+  'unable to charge',
+  'transaction failed',
+  'payment not processed',
 ];
 
 export const POSITIVE_KEYWORDS = {
   strong: [
     'auto-renew',
+    'auto renew',
     'automatically renew',
     'recurring',
     'renews on',
     'next billing date',
     'subscription will renew',
+    'billed every',
+    'charged every',
+    'apple one',
+    'icloud+',
+    'apple tv+',
+    'apple music',
+    'apple arcade',
+    'apple fitness+',
+    'google one',
+    'google play pass',
+    'youtube premium',
+    'youtube music',
   ],
   medium: [
     'subscription',
@@ -76,12 +123,22 @@ export const POSITIVE_KEYWORDS = {
     'plan',
     'premium',
     'pro',
+    'per month',
+    '/month',
+    '/year',
+    'per year',
+    'billed to',
+    'amount charged',
+    'total charged',
+    'amount due',
   ],
   weak: [
     'invoice',
     'receipt',
     'payment',
     'charged',
+    'billing',
+    'renewal',
   ],
 };
 
@@ -92,14 +149,28 @@ export const NEGATIVE_KEYWORDS = {
     'security code',
     'password reset',
     'login alert',
+    'enter this code',
   ],
   commerce: [
+    // One-time purchases / deliveries — NOT subscriptions
     'order confirmed',
+    'order is confirmed',
     'booking confirmed',
     'trip details',
     'your ride',
     'delivered',
     'food order',
     'ticket booked',
+    'flight booking',
+    'hotel booking',
+    'your package',
+    'out for delivery',
+    'has been shipped',
+    'dispatch notification',
+    'items in your order',
+    'track your order',
+    'your amazon order',      // amazon.com ORDER emails (not Prime subscription)
+    'estimated delivery',
+    'arriving',
   ],
 };

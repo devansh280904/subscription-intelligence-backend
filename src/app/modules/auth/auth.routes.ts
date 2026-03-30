@@ -3,6 +3,6 @@ import { googleAuthController } from './auth.controller';
 
 const router = Router();
 
-router.post('/google', googleAuthController)
+router.post('/google/callback', googleAuthController)
 
 export default router;

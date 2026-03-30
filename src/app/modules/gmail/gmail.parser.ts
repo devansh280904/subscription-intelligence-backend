@@ -1,367 +1,319 @@
-import { parse as parseDate } from 'chrono-node'
-
-// these are the details we require so we create an interface
+// src/app/modules/gmail/gmail.parser.ts
+import { parse as parseDate } from 'chrono-node';
+import { ProviderConfig } from './gmail.providers';
 
 export interface ExtractedSubscriptionData {
-    provider: string | null;
-    amount: number | null;
-    currency: string | null;
-    billingCycle: 'MONTHLY' | 'YEARLY' | 'QUARTERLY' | 'WEEKLY' | null;
-    startedAt: Date | null;
-    renewalDate: Date | null;
-    trialEndDate: Date | null;
-    planName: string | null;
+  provider: string;
+  amount: number | null;
+  currency: string | null;
+  billingCycle: 'MONTHLY' | 'YEARLY' | 'QUARTERLY' | 'WEEKLY' | null;
+  startedAt: Date | null;
+  renewalDate: Date | null;
+  trialEndDate: Date | null;
+  planName: string | null;
 }
 
+// ─────────────────────────────────────────────────────────────────
+// Amount extraction
+// ─────────────────────────────────────────────────────────────────
 
-export function extractProviderName(fromHeader: string | null, body: string): string | null {
-    const from = (fromHeader || '').toLowerCase();
-    const bodyLower = body.toLowerCase();
-
-
-    const providerMap: Record<string, string[]> = {
-        'Netflix': ['netflix.com', 'netflix', '@nflx'],
-        'LinkedIn': ['linkedin.com', 'linkedin'],
-        'Spotify': ['spotify.com', 'spotify'],
-        'Amazon Prime': ['primevideo.com', 'amazon.com/prime', 'amazon prime'],
-        'Google Play': ['google play', 'play.google.com'],
-        'Apple': ['apple.com', 'icloud.com', 'itunes'],
-        'Adobe': ['adobe.com', 'adobe'],
-        'Notion': ['notion.so', 'notion'],
-        'GitHub': ['github.com', 'github'],
-        'YouTube Premium': ['youtube.com', 'youtube premium', 'youtube music'],
-        'Disney+': ['disneyplus.com', 'disney+', 'disney plus'],
-        'Hulu': ['hulu.com', 'hulu'],
-        'HBO Max': ['hbomax.com', 'hbo max'],
-        'Canva': ['canva.com', 'canva'],
-        'Figma': ['figma.com', 'figma'],
-        'Dropbox': ['dropbox.com', 'dropbox'],
-        'Microsoft 365': ['microsoft.com', 'microsoft 365', 'office 365'],
-        'Zoom': ['zoom.us', 'zoom'],
-        'ChatGPT Plus': ['openai.com', 'chatgpt'],
-        'AWS': ['aws.amazon.com', 'amazon web services'],
-        'Google Workspace': ['workspace.google.com', 'google workspace'],
-    };
-
-    // we run for loop for each provider and keywords, and run 2nd for for keywords and check if from or body includes that keywords if yes we return that provider
-    for (const [provider, keywords] of Object.entries(providerMap)) {
-        for (const keyword of keywords) {
-            if (from.includes(keyword) || bodyLower.includes(keyword)) {
-                return provider;
-            }
-        }
-    }
-
-    // incase provider is using some other email. eg. noreply@figma.com
-    const emailMatch = from.match(/@([a-z0-9-]+)\./);
-    if (emailMatch) {
-        const domain = emailMatch[1];
-
-        // turning first char into uppercase and rest small
-        return domain.charAt(0).toUpperCase() + domain.slice(1);
-    }
-
-    // returning null if nothing found
-    return null;
+/**
+ * Parse a raw numeric string to a float.
+ * Handles:
+ *   "699.00"   → 699    (decimal separator)
+ *   "1,234.56" → 1234.56
+ *   "1.234,56" → 1234.56 (European)
+ *   "1.234"    → 1234   (European thousands)
+ */
+function parseAmountStr(raw: string): number {
+  // European: 1.234,56
+  if (/^\d{1,3}(\.\d{3})+,\d{1,2}$/.test(raw)) {
+    return parseFloat(raw.replace(/\./g, '').replace(',', '.'));
+  }
+  // European thousands: 1.234
+  if (/^\d{1,3}(\.\d{3})+$/.test(raw)) {
+    return parseFloat(raw.replace(/\./g, ''));
+  }
+  // Standard: 1,234.56 or 699.00 or 13,999
+  return parseFloat(raw.replace(/,/g, ''));
 }
 
-// extracting the amount
-export function extractAmount(text: string): { amount: number | null; currency: string | null } {
-    const currencySymbols: Record<string, string> = {
-        '$': 'USD',
-        '€': 'EUR',
-        '£': 'GBP',
-        '₹': 'INR',
-        '¥': 'JPY',
-        'CA$': 'CAD',
-        'A$': 'AUD',
-    };
-
-    // Patterns for different currency formats
-    const patterns = [
-        // ₹649, ₹999.99 (Indian rupee - prioritize this for your case)
-        /₹\s*(\d{1,5}(?:\.\d{2})?)/g,
-        // $9.99, $99.99, $999.99
-        /\$\s*(\d{1,4}(?:\.\d{2})?)/g,
-        // €9.99, €99,99
-        /€\s*(\d{1,4}(?:[.,]\d{2})?)/g,
-        // £9.99
-        /£\s*(\d{1,4}(?:\.\d{2})?)/g,
-        // USD 9.99, EUR 9.99, INR 649
-        /(USD|EUR|GBP|INR|CAD|AUD)\s*(\d{1,5}(?:\.\d{2})?)/gi,
-        // 9.99 USD, 649 INR
-        /(\d{1,5}(?:\.\d{2})?)\s*(USD|EUR|GBP|INR|CAD|AUD)/gi,
-    ];
-
-    const amounts: Array<{ amount: number; currency: string }> = [];
-
-    for (const pattern of patterns) {
-        const matches = [...text.matchAll(pattern)];
-        for (const match of matches) {
-            let amount: number;
-            let currency: string;
-
-            if (match[0].startsWith('₹')) {
-                amount = parseFloat(match[1].replace(',', ''));
-                currency = 'INR';
-            } else if (match[0].startsWith('$')) {
-                amount = parseFloat(match[1].replace(',', '.'));
-                currency = 'USD';
-            } else if (match[0].startsWith('€')) {
-                amount = parseFloat(match[1].replace(',', '.'));
-                currency = 'EUR';
-            } else if (match[0].startsWith('£')) {
-                amount = parseFloat(match[1].replace(',', '.'));
-                currency = 'GBP';
-            } else if (match[2]) {
-                // Currency code format
-                amount = parseFloat(match[2].replace(',', ''));
-                currency = match[1].toUpperCase();
-            } else {
-                continue;
-            }
-
-            // Filter out unrealistic amounts (too small or too large)
-            if (amount >= 0.99 && amount <= 9999) {
-                amounts.push({ amount, currency });
-            }
-        }
-    }
-
-    // Return the most likely amount (usually the first one found)
-    if (amounts.length > 0) {
-        return { amount: amounts[0].amount, currency: amounts[0].currency };
-    }
-
-    return { amount: null, currency: null };
+function isRealisticAmount(n: number): boolean {
+  return Number.isFinite(n) && n >= 5 && n <= 99_999;
 }
 
-// Detect billing cycle
-export function extractBillingCycle(text: string): 'MONTHLY' | 'YEARLY' | 'QUARTERLY' | 'WEEKLY' | null {
-    const textLower = text.toLowerCase();
+/**
+ * Score the context window around an amount match.
+ * Higher = more likely to be the actual subscription charge.
+ *
+ * KEY FIX: we now also PENALISE amounts that appear next to
+ * "save", "off", "discount", "was", "original price" — those are
+ * savings/strike-through prices, not the charged amount.
+ */
+function scoreContext(text: string, pos: number): number {
+  const before = text.slice(Math.max(0, pos - 200), pos).toLowerCase();
+  const after  = text.slice(pos, pos + 100).toLowerCase();
+  const win    = before + after;
 
-    const patterns = {
-        MONTHLY: ['monthly', 'per month', '/month', 'billed monthly', 'every month', 'month-to-month'],
-        YEARLY: ['yearly', 'annually', 'per year', '/year', 'annual', 'billed yearly', 'every year', 'year-to-year'],
-        QUARTERLY: ['quarterly', 'per quarter', 'every 3 months', '3-month'],
-        WEEKLY: ['weekly', 'per week', '/week', 'every week'],
-    };
-    
-    // running for loop on cycle and keywords, and 2nd loop on keywords to find match and if found returning cycle
-    for (const [cycle, keywords] of Object.entries(patterns)) {
-        for (const keyword of keywords) {
-            if (textLower.includes(keyword)) {
-                return cycle as 'MONTHLY' | 'YEARLY' | 'QUARTERLY' | 'WEEKLY';
-            }
-        }
-    }
-    return null;
-}
+  let s = 0;
 
-
-// extracting plan name 
-export function extractPlanName(text: string): string | null {
-  const planPatterns = [
-    // "Plan: Premium", "Subscription: Basic"
-    /(?:plan|subscription):\s*([A-Za-z0-9\s]+?)(?:\n|$|,|\.|;)/i,
-    // "Premium plan", "Basic subscription"
-    /(premium|pro|basic|standard|plus|family|student|individual|mobile|ultra hd|hd)\s+(?:plan|subscription|membership)?/i,
-    // "You're on the Premium plan"
-    /on\s+the\s+([A-Za-z0-9\s]+?)\s+(?:plan|subscription)/i,
+  // Strong billing signals
+  const STRONG = [
+    'total', 'amount charged', 'amount due', 'billed', 'billing amount',
+    'subscription', 'renewal', 'charged to', 'payment of', 'invoice total',
+    'order total', 'you were charged', "you've been charged", 'receipt',
+    'you have been charged', 'we charged', 'your charge',
+  ];
+  // Medium signals
+  const MED = [
+    'per month', '/month', '/mo', 'per year', '/year', 'monthly',
+    'annually', 'quarterly', 'plan', 'billing cycle',
+  ];
+  // Negative signals — discount/saving prices are NOT the charge
+  const NEG = [
+    'save ', 'saving', '% off', 'discount', 'was ₹', 'was $', 'original',
+    'strike', 'crossed', 'regular price', 'retail price', 'list price',
+    'compare at', 'you save', 'reduced', 'promo',
   ];
 
-  // comparing patterns with texts 
-  for (const pattern of planPatterns) {
-    const match = text.match(pattern);
-    
-    if (match && match[1]) {
-      const planName = match[1].trim();
-      
-      // Filter out junk matches
-      if (planName.length > 2 && planName.length < 50 && !planName.includes('by Netflix')) {
-        return planName;
-      }
+  for (const k of STRONG) if (win.includes(k)) s += 3;
+  for (const k of MED)    if (win.includes(k)) s += 1;
+  for (const k of NEG)    if (win.includes(k)) s -= 4; // hard penalise
+
+  return s;
+}
+
+export function extractAmount(text: string): { amount: number | null; currency: string | null } {
+  const symMap: Record<string, string> = { '₹': 'INR', '$': 'USD', '€': 'EUR', '£': 'GBP', '¥': 'JPY' };
+  type Cand = { amount: number; currency: string; score: number };
+  const cands: Cand[] = [];
+
+  // Symbol + number: ₹649, ₹649.00, $9.99, ₹6,490.00
+  const symBefore = /(₹|\$|€|£|¥)\s*(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d{1,6}(?:\.\d{1,2})?)/g;
+  for (const m of [...text.matchAll(symBefore)]) {
+    const amt = parseAmountStr(m[2]);
+    if (!isRealisticAmount(amt)) continue;
+    cands.push({ amount: amt, currency: symMap[m[1]] ?? 'USD', score: scoreContext(text, m.index ?? 0) });
+  }
+
+  // Code before: INR 649, USD 9.99
+  const codeBefore = /\b(USD|EUR|GBP|INR|CAD|AUD)\s*(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d{1,6}(?:\.\d{1,2})?)/gi;
+  for (const m of [...text.matchAll(codeBefore)]) {
+    const amt = parseAmountStr(m[2]);
+    if (!isRealisticAmount(amt)) continue;
+    cands.push({ amount: amt, currency: m[1].toUpperCase(), score: scoreContext(text, m.index ?? 0) });
+  }
+
+  // Code after: 649 INR, 9.99 USD
+  const codeAfter = /\b(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d{1,6}(?:\.\d{1,2})?)\s*(USD|EUR|GBP|INR|CAD|AUD)\b/gi;
+  for (const m of [...text.matchAll(codeAfter)]) {
+    const amt = parseAmountStr(m[1]);
+    if (!isRealisticAmount(amt)) continue;
+    cands.push({ amount: amt, currency: m[2].toUpperCase(), score: scoreContext(text, m.index ?? 0) });
+  }
+
+  if (cands.length === 0) return { amount: null, currency: null };
+
+  // Drop candidates with strongly negative scores (discount prices, etc.)
+  const positive = cands.filter(c => c.score > -2);
+  const pool     = positive.length > 0 ? positive : cands;
+
+  // Best: highest context score; ties broken by highest amount
+  pool.sort((a, b) => b.score - a.score || b.amount - a.amount);
+  return { amount: pool[0].amount, currency: pool[0].currency };
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Billing cycle
+// ─────────────────────────────────────────────────────────────────
+
+export function extractBillingCycle(
+  text: string,
+  providerDefault?: 'MONTHLY' | 'YEARLY' | 'QUARTERLY' | 'WEEKLY'
+): 'MONTHLY' | 'YEARLY' | 'QUARTERLY' | 'WEEKLY' | null {
+  const t = text.toLowerCase();
+
+  // Yearly patterns — check before monthly to catch "12-month plan"
+  const yearly = [
+    'yearly', 'annually', 'per year', '/year', '/yr', 'annual',
+    'billed yearly', 'billed annually', 'every year', '12 months',
+    'twelve months', '1 year', 'one year', 'annual plan', 'annual membership',
+    '12-month', 'year subscription',
+  ];
+  const quarterly = ['quarterly', 'per quarter', 'every 3 months', '3-month', '3 months', 'three months'];
+  const monthly   = [
+    'monthly', 'per month', '/month', '/mo.', '/mo ', 'billed monthly',
+    'every month', '1 month', '1-month', 'monthly plan', 'monthly membership',
+    'month subscription',
+  ];
+  const weekly = ['weekly', 'per week', '/week', 'every week', '1 week'];
+
+  for (const k of yearly)    if (t.includes(k)) return 'YEARLY';
+  for (const k of quarterly) if (t.includes(k)) return 'QUARTERLY';
+  for (const k of monthly)   if (t.includes(k)) return 'MONTHLY';
+  for (const k of weekly)    if (t.includes(k)) return 'WEEKLY';
+
+  return providerDefault ?? null;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Plan name — strict whitelist
+// ─────────────────────────────────────────────────────────────────
+
+const PLAN_TIERS = [
+  'premium', 'pro', 'basic', 'standard', 'plus', 'individual',
+  'ultra', 'hd', 'ultra hd', '4k', 'mobile', 'essentials',
+  'business', 'enterprise', 'teams', 'starter', 'lite', 'family',
+  'student', 'duo', 'trio',
+];
+
+export function extractPlanName(text: string): string | null {
+  // "Plan: Premium Individual" label
+  const label = text.match(
+    /(?:plan|subscription|membership)\s*[:\-–]\s*([A-Za-z0-9\s]{2,40}?)(?:\n|$|,|\.|;)/i
+  );
+  if (label) {
+    const name = label[1].trim();
+    if (PLAN_TIERS.some(t => name.toLowerCase().includes(t))) {
+      return name.charAt(0).toUpperCase() + name.slice(1);
     }
   }
+
+  // Tier word in natural context
+  const tierRx = new RegExp(
+    `\\b(${PLAN_TIERS.join('|')})\\b(?:\\s+(?:plan|subscription|membership))?`, 'i'
+  );
+  const m = text.match(tierRx);
+  if (m) return m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase();
 
   return null;
 }
 
-// ✅ IMPROVED: Much stricter date validation
+// ─────────────────────────────────────────────────────────────────
+// Date validation
+// ─────────────────────────────────────────────────────────────────
+
 export function isValidSubscriptionDate(date: Date | null): boolean {
-    if (!date) return false;
-    
-    // Check if date is actually a valid Date object
-    if (!(date instanceof Date) || isNaN(date.getTime())) {
-        return false;
-    }
-    
-    const now = new Date();
-    
-    // ✅ CRITICAL FIX: Much tighter bounds
-    // Past: Allow up to 3 years ago (longer subscription history)
-    const threeYearsAgo = new Date(now.getFullYear() - 3, now.getMonth(), now.getDate());
-    
-    // Future: Only allow 1 year ahead for renewals (NOT 5 years!)
-    // Most subscriptions renew monthly/yearly, so 1 year is plenty
-    const oneYearAhead = new Date(now.getFullYear() + 1, now.getMonth(), now.getDate());
-    
-    const isValid = date >= threeYearsAgo && date <= oneYearAhead;
-    
-    // ✅ DEBUG: Log rejected dates
-    if (!isValid) {
-        console.log('[Parser] Rejected invalid date:', {
-            date: date.toISOString(),
-            reason: date < threeYearsAgo ? 'too far in past' : 'too far in future',
-            threeYearsAgo: threeYearsAgo.toISOString(),
-            oneYearAhead: oneYearAhead.toISOString()
-        });
-    }
-    
-    return isValid;
+  if (!date || !(date instanceof Date) || isNaN(date.getTime())) return false;
+  const now    = new Date();
+  const past   = new Date(now.getFullYear() - 5, now.getMonth(), now.getDate());
+  const future = new Date(now.getFullYear() + 2, now.getMonth(), now.getDate());
+  return date >= past && date <= future;
 }
 
-// ✅ IMPROVED: Better date extraction with context awareness
-export function extractSubscriptionDates(
-  body: string,
-  emailDate?: string | null
-): {
-  startedAt: Date | null;
-  renewalDate: Date | null;
-  trialEndDate: Date | null;
-} {
-  const text = body;
+// ─────────────────────────────────────────────────────────────────
+// Date extraction
+// ─────────────────────────────────────────────────────────────────
 
-  let startedAt: Date | null = null;
-  let renewalDate: Date | null = null;
+export function extractSubscriptionDates(body: string, emailDate?: string | null) {
+  let startedAt:    Date | null = null;
+  let renewalDate:  Date | null = null;
   let trialEndDate: Date | null = null;
 
-  // ✅ IMPROVED: More specific patterns
-  const renewalPatterns = [
-    /(?:next billing|next payment|will be charged|will renew)(?:\s+on|\s+date)?:?\s*([^.\n]{5,30})/gi,
-    /(?:renew|renewal)\s+(?:date|on)?:?\s*([^.\n]{5,30})/gi,
-    /(?:subscription|membership)\s+(?:renews|ends)\s+(?:on\s+)?([^.\n]{5,30})/gi,
-  ];
-
-  const trialPatterns = [
-    /trial\s+ends?\s+(?:on\s+)?([^.\n]{5,30})/gi,
-    /free\s+(?:trial\s+)?(?:ends|until)\s+([^.\n]{5,30})/gi,
-  ];
-
-  const startPatterns = [
-    /(?:subscription|membership|plan)\s+(?:started|began|active\s+since)\s+([^.\n]{5,30})/gi,
-    /(?:joined|subscribed|signed up)\s+(?:on\s+)?([^.\n]{5,30})/gi,
-  ];
-
-  // Extracting renewal dates
-  for (const pattern of renewalPatterns) {
-    const matches = [...text.matchAll(pattern)];
-
-    for (const match of matches) {
-      const parsed = parseDate(match[1]);
-      if (parsed && parsed.length > 0) {
-        const date = parsed[0].start.date();
-        
-        if (isValidSubscriptionDate(date)) {
-          renewalDate = date;
-          console.log('[Parser] Found renewal date:', date.toISOString(), 'from:', match[1]);
-          break;
-        }
+  const tryParse = (s: string): Date | null => {
+    // Strip leading/trailing noise
+    const cleaned = s.replace(/^(?:on|at|by)\s+/i, '').trim();
+    try {
+      const r = parseDate(cleaned);
+      if (r?.length > 0) {
+        const d = r[0].start.date();
+        return isValidSubscriptionDate(d) ? d : null;
       }
+    } catch { /* ignore */ }
+    return null;
+  };
+
+  const renewalPats = [
+    /(?:next billing|next payment|will be charged|will renew)(?:\s+on|\s+date)?:?\s*([^.\n]{5,35})/gi,
+    /(?:renew|renewal)\s+(?:date|on)?:?\s*([^.\n]{5,35})/gi,
+    /(?:subscription|membership)\s+(?:renews|ends)\s+(?:on\s+)?([^.\n]{5,35})/gi,
+    /auto-renews?\s+on\s+([^.\n]{5,35})/gi,
+    /billed\s+(?:again\s+)?on\s+([^.\n]{5,35})/gi,
+    /charged\s+on\s+([^.\n]{5,35})/gi,
+    /next\s+charge\s+(?:date|on)?:?\s*([^.\n]{5,35})/gi,
+    /valid\s+(?:until|through)\s+([^.\n]{5,35})/gi,
+  ];
+
+  const trialPats = [
+    /trial\s+ends?\s+(?:on\s+)?([^.\n]{5,35})/gi,
+    /free\s+(?:trial\s+)?(?:ends|until)\s+([^.\n]{5,35})/gi,
+    /trial\s+period\s+ends?\s+(?:on\s+)?([^.\n]{5,35})/gi,
+  ];
+
+  const startPats = [
+    /(?:subscription|membership|plan)\s+(?:started|began|active\s+since)\s+([^.\n]{5,35})/gi,
+    /(?:joined|subscribed|signed up)\s+(?:on\s+)?([^.\n]{5,35})/gi,
+    /(?:start\s+date|started\s+on):?\s*([^.\n]{5,35})/gi,
+  ];
+
+  for (const p of renewalPats) {
+    for (const m of [...body.matchAll(p)]) {
+      const d = tryParse(m[1]);
+      if (d) { renewalDate = d; break; }
     }
     if (renewalDate) break;
   }
 
-  // Extracting trial end dates
-  for (const pattern of trialPatterns) {
-    const matches = [...text.matchAll(pattern)];
-    for (const match of matches) {
-      const parsed = parseDate(match[1]);
-      if (parsed && parsed.length > 0) {
-        const date = parsed[0].start.date();
-        
-        if (isValidSubscriptionDate(date)) {
-          trialEndDate = date;
-          console.log('[Parser] Found trial end date:', date.toISOString(), 'from:', match[1]);
-          break;
-        }
-      }
+  for (const p of trialPats) {
+    for (const m of [...body.matchAll(p)]) {
+      const d = tryParse(m[1]);
+      if (d) { trialEndDate = d; break; }
     }
     if (trialEndDate) break;
   }
 
-  // Extracting start dates
-  for (const pattern of startPatterns) {
-    const matches = [...text.matchAll(pattern)];
-    for (const match of matches) {
-      const parsed = parseDate(match[1]);
-      if (parsed && parsed.length > 0) {
-        const date = parsed[0].start.date();
-        
-        if (isValidSubscriptionDate(date)) {
-          startedAt = date;
-          console.log('[Parser] Found start date:', date.toISOString(), 'from:', match[1]);
-          break;
-        }
-      }
+  for (const p of startPats) {
+    for (const m of [...body.matchAll(p)]) {
+      const d = tryParse(m[1]);
+      if (d) { startedAt = d; break; }
     }
     if (startedAt) break;
   }
 
-  // ✅ CRITICAL FIX: Use email date directly (not chrono-node parsing)
-  // Fallback: if no explicit start date, use email header date
+  // Fallback: use email date as startedAt
   if (!startedAt && emailDate) {
     try {
-      // Gmail sends dates like "Tue, 15 Jan 2025 10:30:00 GMT"
-      // Direct conversion preserves timezone and is accurate
-      const date = new Date(emailDate);
-      
-      if (isValidSubscriptionDate(date)) {
-        startedAt = date;
-        console.log('[Parser] Using email date as start date:', date.toISOString());
-      } else {
-        console.warn('[Parser] Email date is invalid:', emailDate, '→', date.toISOString());
-      }
-    } catch (error) {
-      console.error('[Parser] Error parsing email date:', emailDate, error);
-    }
+      const d = new Date(emailDate);
+      if (isValidSubscriptionDate(d)) startedAt = d;
+    } catch { /* ignore */ }
   }
 
-  return {
-    startedAt,
-    renewalDate,
-    trialEndDate,
-  };
+  return { startedAt, renewalDate, trialEndDate };
 }
 
-// Main extraction function
+// ─────────────────────────────────────────────────────────────────
+// Main entry point — provider-aware
+// ─────────────────────────────────────────────────────────────────
+
 export function extractAllSubscriptionData(
-  fromHeader: string | null,
+  providerConfig: ProviderConfig,
   body: string,
   pdfText: string,
   emailDate?: string | null
 ): ExtractedSubscriptionData {
   const fullText = `${body}\n${pdfText}`;
 
-  console.log('[Parser] Extracting data from email dated:', emailDate);
-  
-  const extracted = {
-    provider: extractProviderName(fromHeader, fullText),
-    ...extractAmount(fullText),
-    billingCycle: extractBillingCycle(fullText),
-    ...extractSubscriptionDates(fullText, emailDate),
-    planName: extractPlanName(fullText),
+  const { amount, currency } = extractAmount(fullText);
+  const billingCycle = extractBillingCycle(fullText, providerConfig.defaultCycle);
+  const { startedAt, renewalDate, trialEndDate } = extractSubscriptionDates(fullText, emailDate);
+  const planName = extractPlanName(fullText);
+
+  const result: ExtractedSubscriptionData = {
+    provider: providerConfig.name,
+    amount,
+    currency,
+    billingCycle,
+    startedAt,
+    renewalDate,
+    trialEndDate,
+    planName,
   };
-  
-  console.log('[Parser] Extraction complete:', {
-    provider: extracted.provider,
-    amount: extracted.amount,
-    currency: extracted.currency,
-    billingCycle: extracted.billingCycle,
-    planName: extracted.planName,
-    startedAt: extracted.startedAt?.toISOString(),
-    renewalDate: extracted.renewalDate?.toISOString(),
+
+  console.log('[Parser]', providerConfig.name, {
+    amount, currency, billingCycle, planName,
+    startedAt: startedAt?.toISOString(),
+    renewalDate: renewalDate?.toISOString(),
   });
-  
-  return extracted;
+
+  return result;
 }

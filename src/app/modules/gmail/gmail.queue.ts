@@ -1,27 +1,25 @@
+// src/app/modules/gmail/gmail.queue.ts
 type Job = () => Promise<void>;
 
 const jobQueue: Job[] = [];
 let isProcessing = false;
+let stopRequested = false;
 
 async function processQueue() {
-  console.log('[Queue] processQueue called');
-
-  if (isProcessing) {
-    console.log('[Queue] Already processing, exiting');
-    return;
-  }
-
+  if (isProcessing) return;
   isProcessing = true;
 
   while (jobQueue.length > 0) {
-    console.log('[Queue] Jobs in queue:', jobQueue.length);
+    if (stopRequested) {
+      console.log('[Queue] Stop requested — draining queue');
+      jobQueue.length = 0;
+      break;
+    }
 
     const job = jobQueue.shift();
     if (job) {
       try {
-        console.log('[Queue] Executing job');
         await job();
-        console.log('[Queue] Job finished');
       } catch (err) {
         console.error('[Queue] Job failed:', err);
       }
@@ -29,16 +27,27 @@ async function processQueue() {
   }
 
   isProcessing = false;
+  stopRequested = false;
   console.log('[Queue] Queue empty');
 }
 
 export function enqueueJob(job: Job) {
-  console.log('[Queue] enqueueJob called');
-
+  stopRequested = false; // reset on new job
   jobQueue.push(job);
+  setImmediate(() => processQueue());
+}
 
-  setImmediate(() => {
-    console.log('[Queue] setImmediate fired');
-    processQueue();
-  });
+/**
+ * Signal the queue to stop after the currently-running job finishes.
+ * Pending jobs are dropped. The running job (a full provider scan) will
+ * complete its current email then check isStopped() before the next one.
+ */
+export function cancelCurrentJob() {
+  console.log('[Queue] cancelCurrentJob called');
+  stopRequested = true;
+}
+
+/** Checked by the scan worker inside its per-email loop */
+export function isStopped(): boolean {
+  return stopRequested;
 }
